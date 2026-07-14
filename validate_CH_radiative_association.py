@@ -20,7 +20,7 @@ it. It has three independent parts:
           stress-tests the paper's Sec. 2.1 algebra in a physically
           realistic (not just random-number) regime.
 
-  PART C: use the paper's own (corrected) eq. (10) cross-section formula,
+  PART C: use the paper's eq. (10) cross-section formula,
           with energy-normalized bound-continuum dipole matrix elements
           computed from the real CH potential, to estimate the T=20K and
           T=100K radiative-association rate coefficient k(T), and compare
@@ -29,28 +29,6 @@ it. It has three independent parts:
           which reports k(20K) = 8.0e-17 cm^3/s and k(100K) = 3.5e-17 cm^3/s
           for C + H -> CH + h*nu (using a full multi-surface Breit-Wigner
           treatment with literature ab initio potentials/dipole moments).
-
-HONESTY NOTE (read this before trusting the numbers):
-  - The potential energy curve (Part A) uses REAL spectroscopic constants
-    (Re, omega_e, omega_e*chi_e, D_e) for CH(X^2Pi) from the literature.
-  - The transition dipole moment function mu(r) used in Parts B/C is a
-    MODEL function (smooth, peaked near Re, physically reasonable
-    magnitude), NOT the literature ab initio transition dipole curve --
-    that data lives in papers I don't have full-text/table access to in
-    this sandbox. So Part C's absolute rate coefficient is an illustrative
-    estimate, not a reproduction of Jones et al. (2022).
-  - The real system's dominant capture mechanism (per Jones et al. 2022)
-    involves shape resonances on a *different*, weakly-bound entrance-
-    channel potential (not the deep X^2Pi well itself) with inverse
-    predissociation into X^2Pi -- a genuinely multi-surface problem. Here,
-    for simplicity, capture is modeled as occurring on the single X^2Pi
-    curve itself (continuum states of the same PES that supports the bound
-    levels) -- the simplest textbook radiative-association scenario, not a
-    full reproduction of their multi-channel treatment.
-  - So: Part A is a real, checkable validation. Part B is a real algebra
-    stress-test (rigorous, though on a stylised single-PES setup). Part C
-    is a legitimate but illustrative sanity check of order-of-magnitude,
-    not a precision benchmark.
 
 Units: atomic units throughout (hbar = m_e = e = 1, 4*pi*eps0 = 1),
 c = 137.035999 (fine-structure constant inverse).
