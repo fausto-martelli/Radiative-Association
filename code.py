@@ -1,8 +1,7 @@
 """
 Numerical validation of the resolvent / Fano-Feshbach algebra in Sec. 2.1
-("Main derivations") of Martelli, "Quantum-Regime Radiative Association".
- 
-WHAT THIS TESTS
+("Main derivations") of, "Quantum-Regime Radiative Association".
+
 ----------------
 Sec. 2.1 solves the coupled equations (eq. 1) for a particle (Hilbert space
 H_p, dimension M here: one bound state + a discretized set of "continuum"
