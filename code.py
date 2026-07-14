@@ -1,267 +1,202 @@
 """
-Attempting to reproduce Jones (nee Burdakova), Gustafsson & Nyman,
-MNRAS 517, 4892 (2022) -- "Formation of the CH/CD molecules through
-radiative association of C with H/D".  Target numbers:
-    k(20 K)  = 8.0e-17 cm^3/s  (peak)
-    k(100 K) = 3.5e-17 cm^3/s
-
-WHAT'S REAL HERE (fetched directly from the article text):
-  - Table 1 potential characteristics: X^2Pi (re=1.121 A, well depth 3.604 eV),
-    B^2Sigma- (re=1.164 A, well depth 0.372 eV, barrier 0.128 eV).
-  - Dipole moment large-r extrapolation parameters D(r)=A*exp(alpha*r), a.u.:
-      B^2Sigma--X^2Pi TRANSITION dipole: A=0.0036,  alpha=-0.5314
-      X^2Pi PERMANENT dipole:            A=-0.0014, alpha=-0.9293
-    (van Dishoeck 1987 / Baluja & Msezane 2001, as quoted by Jones et al.)
-  - Their own perturbation-theory cross-section formula (their eq. 14,
-    from Babb & Dalgarno 1995):
-      sigma = (pi hbar^2)/(3 eps0 c^3) * (1/(mu E)) * P_Lambda * omega^3
-              * S_Honl-London * |M|^2
-    which in atomic units (hbar=1, eps0=1/4pi) is
-      sigma = (4 pi^2)/(3 c^3 mu E) * omega^3 * P_Lambda * S * |M(E)|^2
-    -- this independently confirms the omega^3/(mu E) structure of the
-    corrected eq.(10) in the reviewed .tex.
-
-WHAT'S MISSING (not obtainable in this sandbox):
-  - The DOMINANT low-T contribution, per the paper itself, is "inverse
-    predissociation" through quasi-bound levels of the A^2Delta state
-    (dominates below ~570 K). That requires radiative widths (computed with
-    Le Roy's LEVEL program) AND predissociation/tunnelling widths (taken
-    from an external line list, Masseron et al. 2014) -- i.e. real
-    non-adiabatic/electronic coupling data this environment has no access
-    to. That piece is NOT computed here; instead literature values for
-    *that channel alone* from earlier papers are quoted for context.
-
-So this script computes the two channels for which the paper's actual
-potential-curve and dipole-moment inputs are available in the fetched
-text (X^2Pi->X^2Pi and B^2Sigma- -> X^2Pi), using the SAME box-diagonalization
-approach as before but now with real inputs and the paper's own cross-section
-formula, and reports how far that gets us.
+Numerical validation of the resolvent / Fano-Feshbach algebra in Sec. 2.1
+("Main derivations") of Martelli, "Quantum-Regime Radiative Association".
+ 
+WHAT THIS TESTS
+----------------
+Sec. 2.1 solves the coupled equations (eq. 1) for a particle (Hilbert space
+H_p, dimension M here: one bound state + a discretized set of "continuum"
+levels) coupled to N bosonic bath modes (photon modes), restricted to the
+0-photon / 1-photon subspace. It does so by an *exact* algebraic manipulation
+(isolate the bound-state pole of the free Green's function G_p, define the
+polarization potential V^pol_lambda and effective Hamiltonian H^eff_lambda,
+solve via a Lippmann-Schwinger-type equation) and arrives at a closed-form
+expression for the 0-photon component |phi_0,lambda> (paper's eq. 7).
+ 
+Because this part of the derivation is *pure linear algebra* (no continuum
+limit, no physical approximation has been taken yet), the closed-form
+answer must agree EXACTLY (to numerical precision) with the result of just
+building the full (1+N)*M x (1+N)*M Hamiltonian matrix for the truncated
+0/1-photon problem and solving (lambda - H) psi = (lambda - H0) psi_in
+directly by brute-force matrix inversion.
+ 
+This script builds a random (but fixed-seed, reproducible) toy model,
+solves it both ways, and checks the two solutions agree.  It's a
+mathematical/self-consistency test of the derivation's algebra -- it does
+NOT test whether the physical inputs (real dipole moments, real photon
+density of states, etc.) are realistic; that would require real molecular
+data, which is a separate, larger undertaking.
+ 
+Units: hbar = 1 throughout (Sec. 2.1 never uses a numerical value of hbar,
+only the symbol hbar*Omega_k, so this is a physics-free, hbar-independent
+algebra check).
 """
-
+ 
 import numpy as np
-
+ 
+rng = np.random.default_rng(20260714)
+ 
 # ---------------------------------------------------------------------
-# constants (atomic units)
+# 1. Build a toy particle Hilbert space H_p: one bound state + continuum
 # ---------------------------------------------------------------------
-c_au = 137.035999084
-a0_cm = 5.29177210903e-9
-Eh_eV = 27.211386245988
-t_au_s = 2.4188843265857e-17
-kB_Eh_per_K = 3.1668115634556e-6
-u_to_me = 1822.888486209
-
-m_C_u, m_H_u = 12.0000, 1.007825
-mu_u = m_C_u * m_H_u / (m_C_u + m_H_u)
-mu_au = mu_u * u_to_me
-
-a0_A = 0.5291772109      # Bohr in Angstrom
-
-
-def eV_to_Eh(x):
-    return x / Eh_eV
-
-
-def A_to_bohr(x):
-    return x / a0_A
-
-
+M = 14                     # dimension of the particle space
+eps_b = 0.7                # binding energy (bound state at E_b = -eps_b)
+E_cont = np.linspace(0.3, 6.0, M - 1)   # "continuum" (discretized) energies
+ 
+Hp = np.diag(np.concatenate(([-eps_b], E_cont))).astype(complex)
+phi_b = np.zeros(M, dtype=complex)
+phi_b[0] = 1.0             # bound state is basis vector 0
+ 
 # ---------------------------------------------------------------------
-# grid
+# 2. Bath (photon) modes and coupling
 # ---------------------------------------------------------------------
-Ng = 3000
-rmin, rmax = 0.6, 30.0
-r = np.linspace(rmin, rmax, Ng)
-dr = r[1] - r[0]
-
-
-def diagonalize(V_of_r):
-    main = np.full(Ng, 1.0 / (mu_au * dr**2)) + V_of_r
-    off = np.full(Ng - 1, -1.0 / (2 * mu_au * dr**2))
-    H = np.diag(main) + np.diag(off, 1) + np.diag(off, -1)
-    evals, evecs = np.linalg.eigh(H)
-    norms = np.sqrt(np.sum(evecs**2, axis=0) * dr)
-    evecs = evecs / norms
-    return evals, evecs
-
-
-def rate_from_sigma(sigma_tot, E_cont, T_K):
-    beta = 1.0 / (kB_Eh_per_K * T_K)
-    integrand = sigma_tot * E_cont * np.exp(-beta * E_cont)
-    integral = np.trapezoid(integrand, E_cont)
-    k_au = beta**1.5 * np.sqrt(8.0 / (np.pi * mu_au)) * integral
-    return k_au * a0_cm**3 / t_au_s
-
-
-# =======================================================================
-# CHANNEL 1:  X^2Pi -> X^2Pi   (real well depth + real permanent dipole)
-# =======================================================================
-print("=" * 78)
-print("CHANNEL 1: C+H -> CH(X^2Pi) -> CH(X^2Pi) + h*nu")
-print("           real well depth (Billoux et al. 2014) + real permanent")
-print("           dipole moment (Baluja & Msezane 2001)")
-print("=" * 78)
-
-Re_X_A, De_X_eV, we_X_cm1 = 1.121, 3.604, 2860.4118   # Table 1 + spectroscopy
-Re_X = A_to_bohr(Re_X_A)
-De_X = eV_to_Eh(De_X_eV)
-we_X = we_X_cm1 / 219474.6313632
-a_X = we_X * np.sqrt(mu_au / (2 * De_X))
-
-
-def V_X(rr):
-    return De_X * (1 - np.exp(-a_X * (rr - Re_X))) ** 2 - De_X
-
-
-evals_X, evecs_X = diagonalize(V_X(r))
-n_bound_X = int(np.sum(evals_X < 0))
-print(f"X^2Pi: {n_bound_X} bound levels found; v=0 at {evals_X[0]*Eh_eV:.4f} eV")
-
-# Dipole moment: the paper only gives A, alpha for the LARGE-r EXTRAPOLATION
-# tail (beyond their ab initio grid) -- using A*exp(alpha*r) literally at
-# r=Re gives ~2e-4 a.u. (~5e-4 Debye), which is NOT the real near-equilibrium
-# CH dipole moment (badly underestimates it -- confirmed by a first attempt,
-# see chat). CH(X^2Pi)'s permanent dipole near Re is commonly quoted around
-# ~1.46 Debye in the literature (recalled, not independently re-verified by
-# search in this session -- flagged as such). To stay honest while still
-# using the real literature DECAY RATE (alpha), anchor the amplitude at Re
-# to that commonly-quoted value and keep the literature alpha as the falloff:
-mu_Re_target_D = 1.46                    # Debye, approximate literature value
-mu_Re_target_au = mu_Re_target_D * 0.393456
-alpha_perm = -0.9293                     # real literature decay constant
-
-
-def mu_X_perm(rr):
-    return mu_Re_target_au * np.exp(alpha_perm * (rr - Re_X))
-
-
-mu_diag_X = mu_X_perm(r)
-
-n_cont1 = 400
-cont_idx1 = np.arange(n_bound_X, n_bound_X + n_cont1)
-E_cont1 = evals_X[cont_idx1]
-psi_cont1 = evecs_X[:, cont_idx1]
-psi_bound1 = evecs_X[:, 0:n_bound_X]
-eps_b1 = -evals_X[0:n_bound_X]
-
-D_box1 = (psi_bound1.T @ (mu_diag_X[:, None] * psi_cont1)) * dr
-dE1 = np.gradient(E_cont1)
-D_energy_sq1 = (D_box1**2) / dE1[None, :]
-
-omega1 = E_cont1[None, :] + eps_b1[:, None]
-# eq.14, atomic units, P_Lambda=1, Honl-London factor S=1 (order-of-magnitude
-# treatment; the real calculation sums proper rotational branches)
-sigma_v1 = (4 * np.pi**2) / (3 * c_au**3 * mu_au * E_cont1[None, :]) * omega1**3 * D_energy_sq1
-sigma_tot1 = np.sum(sigma_v1, axis=0)
-
-for T in [20, 100]:
-    k1 = rate_from_sigma(sigma_tot1, E_cont1, T)
-    print(f"  k_X->X(T={T:>3d} K) = {k1:.3e} cm^3/s")
-
-k1_20 = rate_from_sigma(sigma_tot1, E_cont1, 20)
-k1_100 = rate_from_sigma(sigma_tot1, E_cont1, 100)
-
-# =======================================================================
-# CHANNEL 2:  B^2Sigma- -> X^2Pi   (real well+barrier + transition dipole
-#              magnitude/decay-rate anchored the same way as channel 1)
-# =======================================================================
+N = 22
+Omega = np.linspace(0.4, 9.0, N)           # hbar*Omega_k, hbar=1
+zeta = (rng.normal(size=N) + 1j * rng.normal(size=N)) * 0.35   # complex zeta_k
+ 
+# coupling operator f: general Hermitian M x M matrix (f_k = f * zeta_k)
+A = (rng.normal(size=(M, M)) + 1j * rng.normal(size=(M, M))) * 0.15
+f = (A + A.conj().T) / 2   # Hermitian
+ 
+# ---------------------------------------------------------------------
+# 3. Brute-force exact solution: build the full (1+N)*M Hamiltonian and
+#    solve the discretized Lippmann-Schwinger equation directly
+# ---------------------------------------------------------------------
+dim = M * (1 + N)
+H_full = np.zeros((dim, dim), dtype=complex)
+H0_full = np.zeros((dim, dim), dtype=complex)   # asymptotic (uncoupled) H
+ 
+H_full[0:M, 0:M] = Hp
+H0_full[0:M, 0:M] = Hp
+ 
+for k in range(N):
+    sl = slice(M + k * M, M + (k + 1) * M)
+    block = Hp + Omega[k] * np.eye(M)
+    H_full[sl, sl] = block
+    H0_full[sl, sl] = block
+    # <0-photon| H |mode k> = f_k^dagger = zeta_k^* f^dagger = zeta_k^* f  (f Hermitian)
+    H_full[0:M, sl] = np.conj(zeta[k]) * f
+    # <mode k| H |0-photon> = f_k = zeta_k f
+    H_full[sl, 0:M] = zeta[k] * f
+ 
+assert np.allclose(H_full, H_full.conj().T), "H_full must be Hermitian"
+ 
+# incident state: a specific continuum channel j in the 0-photon sector
+j = 5
+E = Hp[1 + j, 1 + j].real   # unperturbed incident energy (index 0 is the bound state)
+eta = 1e-6
+lam = E + 1j * eta
+ 
+psi_in = np.zeros(dim, dtype=complex)
+psi_in[1 + j] = 1.0   # basis index (1+j) in the 0-photon block = continuum state E
+ 
+rhs = (lam * np.eye(dim) - H0_full) @ psi_in   # = i*eta * psi_in, since psi_in is an H0 eigenstate
+psi_lambda_exact = np.linalg.solve(lam * np.eye(dim) - H_full, rhs)
+phi0_lambda_exact = psi_lambda_exact[0:M]      # the 0-photon component, i.e. |phi_0,lambda>
+ 
+# ---------------------------------------------------------------------
+# 4. Closed-form solution following the paper's eqs. (2)-(7) exactly
+# ---------------------------------------------------------------------
+IM = np.eye(M, dtype=complex)
+ 
+ 
+def Gp(alpha):
+    return np.linalg.inv(alpha * IM - Hp)
+ 
+ 
+def Gp_tilde(alpha):
+    # subtract the bound-state pole term: Gp(alpha) = |b><b|/(alpha+eps_b) + Gp_tilde(alpha)
+    return Gp(alpha) - np.outer(phi_b, phi_b.conj()) / (alpha + eps_b)
+ 
+ 
+# V^pol_lambda = sum_k f_k^dagger Gp_tilde(lambda - Omega_k) f_k   [corrected form, eq. in fixed .tex]
+Vpol = np.zeros((M, M), dtype=complex)
+for k in range(N):
+    Vpol += np.abs(zeta[k])**2 * f @ Gp_tilde(lam - Omega[k]) @ f
+ 
+Heff = Hp + Vpol
+Geff = np.linalg.inv(lam * IM - Heff)
+ 
+# direct-diffusion state: (lambda - Heff)|phi0^d> = (lambda - Hp)|psi_in>
+rhs_M = np.zeros(M, dtype=complex)
+rhs_M[1 + j] = 1j * eta   # (lambda - E)*e_{1+j} = i*eta*e_{1+j}, matches psi_in restricted to M-dim
+phi0_d = np.linalg.solve(lam * IM - Heff, rhs_M)
+ 
+# I(lambda,N) = sum_k |zeta_k|^2 / (lambda - Omega_k + eps_b)
+I_lam = np.sum(np.abs(zeta)**2 / (lam - Omega + eps_b))
+ 
+# X = <phi_b| f Geff f^dagger |phi_b>  =  Delta_eps(lambda) - i*gamma(lambda)/2
+fdag_phib = f.conj().T @ phi_b   # = f @ phi_b since f Hermitian
+X = phi_b.conj() @ f @ Geff @ fdag_phib
+ 
+phib_f_phi0d = phi_b.conj() @ f @ phi0_d
+ 
+phi0_lambda_closed = phi0_d + (Geff @ fdag_phib) * (phib_f_phi0d * I_lam) / (1 - I_lam * X)
+ 
+# ---------------------------------------------------------------------
+# 5. Compare
+# ---------------------------------------------------------------------
+diff = np.linalg.norm(phi0_lambda_closed - phi0_lambda_exact)
+ref = np.linalg.norm(phi0_lambda_exact)
+rel_err = diff / ref
+ 
+print("=" * 70)
+print("Test: closed-form eq.(7) vs brute-force numerical solve of eqs.(1)")
+print("=" * 70)
+print(f"M (particle levels) = {M}, N (photon modes) = {N}")
+print(f"incident channel energy E = {E:.6f}, eta = {eta:.1e}")
+print(f"||phi_0,lambda||          (exact)  = {ref:.6e}")
+print(f"||closed - exact||                 = {diff:.6e}")
+print(f"relative error                     = {rel_err:.3e}")
 print()
-print("=" * 78)
-print("CHANNEL 2: C+H -> CH(B^2Sigma-) -> CH(X^2Pi) + h*nu")
-print("           real well depth/barrier (Billoux et al. 2014);")
-print("           transition-dipole DECAY RATE is real (van Dishoeck 1987),")
-print("           its near-Re AMPLITUDE is an illustrative order-of-magnitude")
-print("           guess (not independently verified -- see caveats in chat)")
-print("=" * 78)
-
-Re_B_A, De_B_eV, Vbar_eV = 1.164, 0.372, 0.128
-Re_B = A_to_bohr(Re_B_A)
-De_B = eV_to_Eh(De_B_eV)
-Vbar = eV_to_Eh(Vbar_eV)
-we_B_cm1 = 1700.0     # B state harmonic frequency not extracted from the
-                        # fetched text; using a typical value for a shallow
-                        # (0.37 eV) CH excited-state well as an estimate
-we_B = we_B_cm1 / 219474.6313632
-a_B = we_B * np.sqrt(mu_au / (2 * De_B))
-
-# barrier bump: b*(r-Re)^2*exp(-b(r-Re)) for r>Re, vanishes at r=Re (doesn't
-# change the well depth), peaks at r=Re+2/b with height Vbar
-r_bump_offset = 1.5          # Bohr, where the barrier peaks beyond Re (assumed)
-b_bump = 2.0 / r_bump_offset
-Vb_bump = Vbar * b_bump**2 * np.e**2 / 4.0
-
-
-def V_B(rr):
-    morse = De_B * (1 - np.exp(-a_B * (rr - Re_B))) ** 2 - De_B
-    x = np.clip(rr - Re_B, 0, None)
-    bump = Vb_bump * x**2 * np.exp(-b_bump * x)
-    return morse + bump
-
-
-evals_B, evecs_B = diagonalize(V_B(r))
-n_bound_B = int(np.sum(evals_B < 0))
-Vmax = np.max(V_B(r[r > Re_B + 0.3]))
-print(f"B^2Sigma-: {n_bound_B} bound levels; barrier peak = {Vmax*Eh_eV:.4f} eV "
-      f"(target {Vbar_eV:.3f} eV)")
-
-mu_Re_BX_au_guess = 0.1     # ILLUSTRATIVE ONLY -- see caveat above
-alpha_trans = -0.5314        # real literature decay constant
-
-
-def mu_BX_trans(rr):
-    return mu_Re_BX_au_guess * np.exp(alpha_trans * (rr - Re_B))
-
-
-mu_diag_BX = mu_BX_trans(r)
-
-n_cont2 = 400
-cont_idx2 = np.arange(n_bound_B, n_bound_B + n_cont2)
-E_cont2 = evals_B[cont_idx2]
-psi_cont2 = evecs_B[:, cont_idx2]
-# final bound states are on the X^2Pi curve (psi_bound1 from Channel 1)
-D_box2 = (psi_bound1.T @ (mu_diag_BX[:, None] * psi_cont2)) * dr
-dE2 = np.gradient(E_cont2)
-D_energy_sq2 = (D_box2**2) / dE2[None, :]
-
-omega2 = E_cont2[None, :] + eps_b1[:, None]     # photon energy to X^2Pi levels
-sigma_v2 = (4 * np.pi**2) / (3 * c_au**3 * mu_au * E_cont2[None, :]) * omega2**3 * D_energy_sq2
-sigma_tot2 = np.sum(sigma_v2, axis=0)
-
-for T in [20, 100]:
-    k2 = rate_from_sigma(sigma_tot2, E_cont2, T)
-    print(f"  k_B->X(T={T:>3d} K) = {k2:.3e} cm^3/s")
-
-k2_20 = rate_from_sigma(sigma_tot2, E_cont2, 20)
-k2_100 = rate_from_sigma(sigma_tot2, E_cont2, 100)
-
-# =======================================================================
-# COMBINE + comparison
-# =======================================================================
+if rel_err < 1e-8:
+    print("PASS: the closed-form resolvent solution (eqs. 2-7) reproduces the")
+    print("      brute-force numerical solution to ~machine precision.")
+    print("      => the algebra in Sec. 2.1 (bound-state pole extraction,")
+    print("         V^pol, H^eff, Lippmann-Schwinger resummation) is correct.")
+else:
+    print("FAIL: closed-form and brute-force solutions disagree beyond")
+    print("      numerical tolerance -- there is an algebra error in Sec. 2.1.")
+ 
+# Also test at several other random incident channels / lambda points for robustness
 print()
-print("=" * 78)
-print("COMBINING: computed channels + literature range for the missing")
-print("           (uncomputable here) A^2Delta inverse-predissociation channel")
-print("=" * 78)
-
-# literature estimates for the A^2Delta-only inverse-predissociation channel
-# (from studies that considered ONLY that channel, as quoted in Jones et al.
-# 2022's introduction/discussion):
-#   Julienne & Krauss (1973): 1e-17 cm^3/s at 100K (upper limit; "an order
-#       of magnitude lower being more likely" -> ~1e-18)
-#   Brzozowski et al. (1976): 2.0e-18 cm^3/s at 100K (as low as 4.9e-20
-#       possible)
-A_delta_100K_range = (4.9e-20, 1.0e-17)
-A_delta_100K_mid = 2.0e-18   # Brzozowski central estimate, for illustration
-
-print(f"channel 1 (X->X),  k(20K)={k1_20:.2e}, k(100K)={k1_100:.2e} cm^3/s  [real inputs]")
-print(f"channel 2 (B->X),  k(20K)={k2_20:.2e}, k(100K)={k2_100:.2e} cm^3/s  [partial real inputs]")
-print(f"channel 3 (A-delta inverse predissoc.), k(100K) ~ {A_delta_100K_range[0]:.1e} "
-      f"to {A_delta_100K_range[1]:.1e} cm^3/s [NOT computed -- cited from Julienne & Krauss "
-      f"1973 / Brzozowski et al. 1976, who studied only this channel]")
-
-total_100K_low = k1_100 + k2_100 + A_delta_100K_range[0]
-total_100K_mid = k1_100 + k2_100 + A_delta_100K_mid
-total_100K_high = k1_100 + k2_100 + A_delta_100K_range[1]
+print("Robustness check over multiple random (channel, eta) draws:")
+worst = 0.0
+for trial in range(8):
+    jj = rng.integers(0, M - 1)
+    Ej = Hp[1 + jj, 1 + jj].real
+    etaj = 10 ** rng.uniform(-8, -4)
+    lamj = Ej + 1j * etaj
+ 
+    def Gp_(alpha):
+        return np.linalg.inv(alpha * IM - Hp)
+ 
+    def Gpt_(alpha):
+        return Gp_(alpha) - np.outer(phi_b, phi_b.conj()) / (alpha + eps_b)
+ 
+    Vpol_j = np.zeros((M, M), dtype=complex)
+    for k in range(N):
+        Vpol_j += np.abs(zeta[k])**2 * f @ Gpt_(lamj - Omega[k]) @ f
+    Heff_j = Hp + Vpol_j
+    Geff_j = np.linalg.inv(lamj * IM - Heff_j)
+    rhs_j = np.zeros(M, dtype=complex)
+    rhs_j[1 + jj] = 1j * etaj
+    phi0d_j = np.linalg.solve(lamj * IM - Heff_j, rhs_j)
+    I_j = np.sum(np.abs(zeta)**2 / (lamj - Omega + eps_b))
+    X_j = phi_b.conj() @ f @ Geff_j @ fdag_phib
+    coup_j = phi_b.conj() @ f @ phi0d_j
+    closed_j = phi0d_j + (Geff_j @ fdag_phib) * (coup_j * I_j) / (1 - I_j * X_j)
+ 
+    psi_in_j = np.zeros(dim, dtype=complex)
+    psi_in_j[1 + jj] = 1.0
+    rhs_full_j = (lamj * np.eye(dim) - H0_full) @ psi_in_j
+    exact_full_j = np.linalg.solve(lamj * np.eye(dim) - H_full, rhs_full_j)
+    exact_j = exact_full_j[0:M]
+ 
+    err = np.linalg.norm(closed_j - exact_j) / np.linalg.norm(exact_j)
+    worst = max(worst, err)
+    print(f"  channel {jj:2d}  E={Ej:6.3f}  eta={etaj:.1e}   rel.err = {err:.3e}")
+ 
 print()
-print(f"combined estimate at 100K: {total_100K_low:.2e} (low) -- {total_100K_mid:.2e} (mid) "
-      f"-- {total_100K_high:.2e} (high) cm^3/s")
-print(f"Jones et al. (2022) actual total at 100K:            3.5e-17 cm^3/s")
+print(f"Worst-case relative error across trials: {worst:.3e}")
+print("PASS" if worst < 1e-6 else "FAIL")
