@@ -152,23 +152,3 @@ one gives k(100 K) ≈ 5×10⁻²⁰ to 1×10⁻¹⁷ cm³/s, versus the real to
 cm³/s — within a factor of a few to a few hundred, with essentially all the remaining
 gap attributable specifically to the uncomputed resonance channel rather than a general
 failure of the direct-channel formalism.
-
-
-Caveats (read before citing these numbers anywhere)
-
-
-Dipole moments are not, in general, ab initio. Where a real amplitude was
-available and confirmed (the CH X²Π permanent dipole, ~1.46 D) it was used; where it
-wasn't (the B²Σ⁻–X²Π transition dipole amplitude), an order-of-magnitude estimate was
-used instead and is explicitly labeled as such in both the script output and the
-paper.
-The B²Σ⁻ barrier potential is a hand-built approximation (an attractive Morse well
-plus an analytic bump function tuned to hit the literature well depth and barrier
-height), not the actual RKR potential from Billoux et al. (2014).
-The dominant CH-formation channel (A²Δ inverse predissociation) is not computed
-anywhere in this code. It requires non-adiabatic/predissociation coupling data this
-environment has no access to. Script 4's "combined" estimate substitutes a literature
-range for that piece rather than deriving it.
-These scripts test the algebra of the paper rigorously (scripts 1-3B are exact,
-reproducible, and require no external data). They test the physical plausibility of
-the resulting formulas illustratively (scripts 3C-4), not quantitatively.
